@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Echo Tag: Sonar</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 3D scene mounts here -->
+  <div id="scene"></div>
+
+  <!-- LOBBY / MENU -->
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <h1>🔊 ECHO&nbsp;TAG</h1>
+      <p class="tag">Total darkness. The only way to see anyone is to ping.</p>
+      <input id="nameInput" maxlength="14" placeholder="Your name" />
+      <button id="createBtn" class="primary">Create a room</button>
+      <div class="row">
+        <input id="codeInput" maxlength="4" placeholder="CODE" />
+        <button id="joinBtn">Join</button>
+      </div>
+      <p id="menuError" class="error"></p>
+      <details class="how">
+        <summary>How to play</summary>
+        <ul>
+          <li>The arena is pitch black. <b>You cannot see other players at all</b> — until a sonar wave sweeps over them.</li>
+          <li>One <b>hunter</b> starts. Only hunters can fire a <b>ping</b> (Space / button) — an expanding wave that briefly lights up everyone it touches.</li>
+          <li>But pinging also <b>reveals the hunter's own position</b> to everyone. Hunt carefully.</li>
+          <li>Hunters <b>tag</b> hiders on contact — tagged hiders become hunters too.</li>
+          <li><b>Hiders win</b> if anyone survives the timer. <b>Hunters win</b> if they catch everyone.</li>
+          <li>Move: <b>WASD</b> / arrows, or the joystick. The camera follows behind you.</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+  <!-- WAITING ROOM -->
+  <div id="lobby" class="overlay hidden">
+    <div class="panel">
+      <h2>Room <span id="roomCode" class="code"></span></h2>
+      <p class="tag">Share the code (or your WiFi link) with friends.</p>
+      <ul id="playerList" class="players"></ul>
+
+      <div id="hostSettings" class="settings hidden">
+        <div class="setHead">Game settings</div>
+
+        <div class="setRow">
+          <span class="setName">Map</span>
+          <div id="mapBtns" class="mapBtns"></div>
+        </div>
+
+        <label class="setRow">
+          <span class="setName">Max players <b id="mpVal">8</b></span>
+          <input id="mpSlider" data-key="maxPlayers" type="range" min="2" max="8" step="1" value="8" />
+        </label>
+        <label class="setRow">
+          <span class="setName">Round length <b id="rlVal">90</b>s</span>
+          <input id="rlSlider" data-key="roundSeconds" type="range" min="30" max="180" step="10" value="90" />
+        </label>
+        <label class="setRow">
+          <span class="setName">Starting hunters <b id="shVal">1</b></span>
+          <input id="shSlider" data-key="startHunters" type="range" min="1" max="6" step="1" value="1" />
+        </label>
+        <div class="setRow">
+          <span class="setName">Speed</span>
+          <div id="speedBtns" class="segBtns"></div>
+        </div>
+
+        <div class="setHead">Visibility</div>
+        <label class="setRow">
+          <span class="setName">Reveal time <b id="rvVal">1.3</b>s</span>
+          <input id="rvSlider" data-key="revealDuration" type="range" min="0.4" max="3" step="0.1" value="1.25" />
+        </label>
+        <label class="setRow">
+          <span class="setName">Ping reach <b id="prVal">200</b></span>
+          <input id="prSlider" data-key="pingReach" type="range" min="80" max="280" step="10" value="200" />
+        </label>
+        <label class="setRow">
+          <span class="setName">Glow radius <b id="glVal">0</b></span>
+          <input id="glSlider" data-key="glowRadius" type="range" min="0" max="70" step="5" value="0" />
+        </label>
+        <label class="setRow">
+          <span class="setName">Ping cooldown <b id="cdVal">6</b>s</span>
+          <input id="cdSlider" data-key="pingCooldown" type="range" min="2" max="12" step="1" value="6" />
+        </label>
+        <label class="setRow">
+          <span class="setName">Web cooldown <b id="wcVal">4</b>s</span>
+          <input id="wcSlider" data-key="webCooldown" type="range" min="2" max="10" step="1" value="4" />
+        </label>
+        <p class="hint">Glow radius 0 = pure darkness (ping is the only way to see). Obstacles block both pings and glow — real hiding spots.</p>
+      </div>
+      <div id="settingsReadonly" class="settings hidden"></div>
+
+      <button id="startBtn" class="primary hidden">Start round</button>
+      <p id="waitMsg" class="tag"></p>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="timer">90</div>
+    <div id="role"></div>
+    <div id="abilities" class="hidden">
+      <span id="pingChip" class="chip">PING <kbd>Space</kbd></span>
+      <span id="webChip" class="chip">WEB <kbd>Click</kbd></span>
+    </div>
+  </div>
+
+  <!-- RESULT BANNER -->
+  <div id="result" class="overlay hidden">
+    <div class="panel">
+      <h1 id="resultTitle"></h1>
+      <p id="resultSub" class="tag"></p>
+    </div>
+  </div>
+
+  <!-- Mobile controls -->
+  <div id="touchControls" class="hidden">
+    <div id="joystick"><div id="stick"></div></div>
+    <button id="webBtn">WEB</button>
+    <button id="pingBtn">PING</button>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three.module.js" } }
+  </script>
+  <script type="module" src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Render Blueprint — deploys Echo Tag as a free web service.
+# https://render.com  ->  New  ->  Blueprint  ->  connect this repo.
+services:
+  - type: web
+    name: echo-tag
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
