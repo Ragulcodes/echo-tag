@@ -1,0 +1,30 @@
+name: keep-alive
+
+# Pings the deployed app every ~10 minutes so a free host (e.g. Render) never
+# sleeps — eliminating the cold-start delay when your friends open the link.
+#
+# Setup: after deploying, add your app URL as a repo variable named APP_URL
+#   GitHub repo -> Settings -> Secrets and variables -> Actions -> Variables
+#   -> New repository variable -> name: APP_URL  value: https://echo-tag.onrender.com
+# (Public repos get unlimited Actions minutes, so this is free.)
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes (GitHub may delay a few min — that's fine)
+  workflow_dispatch:           # lets you run it manually from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the app
+        run: |
+          if [ -z "${{ vars.APP_URL }}" ]; then
+            echo "APP_URL repo variable not set yet — skipping. Add it in Settings > Variables."
+            exit 0
+          fi
+          echo "Pinging ${{ vars.APP_URL }}"
+          code=$(curl -s -o /dev/null -w "%{http_code}" -H "ngrok-skip-browser-warning: 1" --max-time 60 "${{ vars.APP_URL }}/")
+          echo "HTTP $code"
+          # treat any response as success (the goal is just to wake/keep it warm)
+          [ -n "$code" ] && [ "$code" != "000" ]
