@@ -9,8 +9,8 @@ const assert = (c, m) => { if (!c) { fail = true; console.error("  ✗ FAIL:", m
 
 function mkClient(name) {
   const s = io(URL, { forceNew: true });
-  const c = { s, name, last: null, id: null, code: null, isHost: false };
-  s.on("state", (st) => { c.last = st; });
+  const c = { s, name, last: null, id: null, code: null, isHost: false, events: [] };
+  s.on("state", (st) => { c.last = st; if (st.events) c.events.push(...st.events); });
   return c;
 }
 const join = (c, code) => new Promise((res) =>
@@ -149,6 +149,31 @@ for (let i = 0; i < 70 && !smooched; i++) {
 hA.s.emit("input", {}); hB.s.emit("input", {});
 assert(smooched, "two hiders bumping triggers a smooch (heart marker)");
 
+// ---- Scenario 3: bots, danger, emote ----
+const d = mkClient("Solo");
+await join(d, "");
+d.s.emit("addBot"); d.s.emit("addBot"); d.s.emit("addBot");
+await sleep(250);
+assert(d.last.botCount === 3 && d.last.players.length === 4, "host adds bots (3 bots, 4 players)");
+d.s.emit("removeBot");
+await sleep(180);
+assert(d.last.botCount === 2, "host removes a bot");
+d.events.length = 0; // 1 hunter + 2 hiders -> the round lasts long enough to observe
+d.s.emit("start");
+await sleep(4700);
+assert(d.last.state === "playing", "round with bots is playing");
+assert(typeof d.last.me.danger === "number", "hider snapshot carries a danger value");
+d.s.emit("emote", "😎");
+await sleep(300);
+assert(d.events.some((e) => e.type === "emote" && e.emoji === "😎"), "emote broadcasts to the room");
+
+// ---- Scenario 4: quick play (one button -> instant match vs bots) ----
+const e = mkClient("Quick");
+await join(e, "");
+e.s.emit("quickplay");
+await sleep(5000);
+assert(e.last.botCount >= 2 && (e.last.state === "playing"), "quick play fills bots and starts a match");
+
 log(fail ? "RESULT: FAILURES PRESENT" : "RESULT: ALL CHECKS PASSED");
-[a, b, c1, c2, c3].forEach((c) => c.s.close());
+[a, b, c1, c2, c3, d, e].forEach((c) => c.s.close());
 process.exit(fail ? 1 : 0);

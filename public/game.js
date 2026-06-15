@@ -12,6 +12,13 @@ let isHost = false;
 let latest = null;
 let world = { hx: 150, hz: 100 };
 
+// remembered name + invite link (?room=CODE) for one-tap joins
+const savedName = localStorage.getItem("echotag_name");
+if (savedName) $("nameInput").value = savedName;
+const inviteRoom = (new URLSearchParams(location.search).get("room") || "").toUpperCase().slice(0, 4);
+if (inviteRoom) $("codeInput").value = inviteRoom;
+let lastJoin = null; // {code, name} for reconnect
+
 // ------------------------------------------------------------------- audio
 let actx = null;
 function initAudio() {
@@ -35,11 +42,12 @@ const playPing = () => tone(880, 220, 0.5, "sine", 0.14);
 const playWeb = () => tone(1200, 140, 0.16, "square", 0.12);
 const playTag = () => { tone(420, 660, 0.12, "triangle", 0.18); setTimeout(() => tone(660, 880, 0.12, "triangle", 0.16), 70); };
 function playSmooch() {
-  // a quick "mwah": pitch rises then a soft pop
   tone(520, 1150, 0.1, "sine", 0.2);
   setTimeout(() => tone(900, 300, 0.13, "sine", 0.16), 80);
 }
-const SOUND = { ping: playPing, web: playWeb, tag: playTag, smooch: playSmooch };
+const playEmote = () => tone(680, 940, 0.08, "sine", 0.1);
+const playHeart = (i) => tone(64, 50, 0.12, "sine", 0.06 + 0.12 * i); // tension thump
+const SOUND = { ping: playPing, web: playWeb, tag: playTag, smooch: playSmooch, emote: playEmote };
 
 // ---------------------------------------------------------------- THREE setup
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -273,25 +281,124 @@ function makeSmooch() {
   return sp;
 }
 
+// ---------------------------------------------- juice: shake / flash / bursts
+let shakeAmt = 0;
+const shake = (a) => { shakeAmt = Math.min(3, Math.max(shakeAmt, a)); };
+const flashEl = $("flash"), dangerEl = $("danger");
+function flash(a = 0.85) { flashEl.style.opacity = String(a); setTimeout(() => { flashEl.style.opacity = "0"; }, 40); }
+
+const bursts = []; // expanding shockwave ring at a catch
+function spawnBurst(x, z, color = "#ffffff") {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.6, 1.5, 32),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false })
+  );
+  ring.rotation.x = -Math.PI / 2; ring.position.set(x, 1, z);
+  scene.add(ring);
+  bursts.push({ ring, t: 0 });
+}
+function updateBursts(dt) {
+  for (let i = bursts.length - 1; i >= 0; i--) {
+    const b = bursts[i]; b.t += dt;
+    const s = 1 + b.t * 80;
+    b.ring.scale.set(s, s, s);
+    b.ring.material.opacity = Math.max(0, 0.95 - b.t * 2.4);
+    if (b.t > 0.45) { scene.remove(b.ring); b.ring.geometry.dispose(); bursts.splice(i, 1); }
+  }
+}
+
+// floating name label
+function makeLabel(text, color) {
+  const cv = document.createElement("canvas"); cv.width = 256; cv.height = 64;
+  const c = cv.getContext("2d");
+  c.font = "bold 36px ui-sans-serif, system-ui"; c.textAlign = "center"; c.textBaseline = "middle";
+  c.lineWidth = 7; c.strokeStyle = "rgba(0,0,0,0.85)"; c.strokeText(text, 128, 34);
+  c.fillStyle = color; c.fillText(text, 128, 34);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthTest: false, depthWrite: false }));
+  sp.scale.set(18, 4.5, 1);
+  return sp;
+}
+
+// emote bubbles that follow a player and float up
+const emoteTexCache = {};
+function emoteSprite(emoji) {
+  if (!emoteTexCache[emoji]) {
+    const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+    const c = cv.getContext("2d"); c.font = "48px serif"; c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText(emoji, 32, 36);
+    emoteTexCache[emoji] = new THREE.CanvasTexture(cv);
+  }
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: emoteTexCache[emoji], transparent: true, depthTest: false }));
+  sp.scale.set(11, 11, 1); return sp;
+}
+const emoteBubbles = [];
+function spawnEmote(id, emoji) {
+  const pm = playerMeshes.get(id); if (!pm) return;
+  const sp = emoteSprite(emoji); scene.add(sp); emoteBubbles.push({ pm, sp, t: 0 });
+}
+function updateEmotes(dt) {
+  for (let i = emoteBubbles.length - 1; i >= 0; i--) {
+    const e = emoteBubbles[i]; e.t += dt;
+    const p = e.pm.group.position;
+    e.sp.position.set(p.x, 20 + e.t * 10, p.z);
+    e.sp.material.opacity = Math.max(0, 1 - e.t / 1.6);
+    if (e.t > 1.6) { scene.remove(e.sp); emoteBubbles.splice(i, 1); }
+  }
+}
+
+// big animated role-reveal banner at round start
+const roleBanner = $("roleBanner");
+function showRoleBanner(isHunter) {
+  $("roleBannerText").textContent = isHunter ? "HUNTER" : "HIDER";
+  $("roleBannerSub").textContent = isHunter ? "Ping, web & tag them all" : "Stay unseen — survive the timer";
+  roleBanner.className = isHunter ? "hunter" : "hider";
+  void roleBanner.offsetWidth; // restart the CSS animation
+  roleBanner.classList.add("show");
+  setTimeout(() => roleBanner.classList.remove("show"), 2300);
+}
+
 // ------------------------------------------------------------------- menu flow
 $("createBtn").onclick = () => doJoin("");
 $("joinBtn").onclick = () => doJoin($("codeInput").value);
+$("quickBtn").onclick = () => doJoin("", { quick: true });
 $("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doJoin($("codeInput").value); });
 
-function doJoin(code) {
+function doJoin(code, opts = {}) {
   initAudio();
   const name = $("nameInput").value.trim() || "Player";
+  localStorage.setItem("echotag_name", name);
   socket.emit("join", { code, name }, (res) => {
     if (!res || res.error) { $("menuError").textContent = res?.error || "Could not join"; return; }
     myId = res.id;
     isHost = res.isHost;
+    lastJoin = { code: res.code, name };
     $("roomCode").textContent = res.code;
     menu.classList.add("hidden");
     lobby.classList.remove("hidden");
+    if (opts.quick) socket.emit("quickplay");
   });
 }
 
 $("startBtn").onclick = () => socket.emit("start");
+
+// one-tap invite: auto-join the room from the link if we already know the player's name
+if (inviteRoom && savedName) doJoin(inviteRoom);
+
+$("copyLinkBtn").onclick = () => {
+  const url = location.origin + "/?room=" + ($("roomCode").textContent || "");
+  const b = $("copyLinkBtn");
+  const done = () => { b.textContent = "✓ Link copied!"; b.classList.add("copied"); setTimeout(() => { b.textContent = "🔗 Copy invite link"; b.classList.remove("copied"); }, 1600); };
+  if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, done); else done();
+};
+
+$("botPlus").onclick = () => socket.emit("addBot");
+$("botMinus").onclick = () => socket.emit("removeBot");
+
+document.querySelectorAll("#emoteBar button").forEach((b) =>
+  b.addEventListener("click", () => { initAudio(); socket.emit("emote", b.dataset.emote); }));
+
+// reconnect: if the socket drops then returns mid-session, silently rejoin the same room
+socket.on("connect", () => { if (lastJoin) socket.emit("join", lastJoin, (res) => { if (res && !res.error) myId = res.id; }); });
 
 // ----------------------------------------------------- host settings panel
 const MAP_LIST = [
@@ -366,9 +473,11 @@ const keyMap = {
   ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
 };
 const sendInput = () => socket.emit("input", keys);
+const EMOTES = ["👋", "😱", "😎", "🎯"];
 window.addEventListener("keydown", (e) => {
   initAudio();
   if (e.code === "Space") { firePing(); e.preventDefault(); return; }
+  if (/^Digit[1-4]$/.test(e.code) && latest?.state === "playing") { socket.emit("emote", EMOTES[+e.code.slice(5) - 1]); return; }
   const k = keyMap[e.code];
   if (k && !keys[k]) { keys[k] = true; sendInput(); }
 });
@@ -447,10 +556,27 @@ $("pingBtn").addEventListener("touchstart", (e) => { initAudio(); firePing(); e.
 $("webBtn").addEventListener("touchstart", (e) => { initAudio(); fireWebFacing(); e.preventDefault(); }, { passive: false });
 
 // --------------------------------------------------------------- server state
+let prevState = null, prevHunter = null;
 socket.on("state", (s) => {
   latest = s;
   if (s.map && s.map.id !== currentMapId) applyMap(s.map);
-  if (s.events) for (const ev of s.events) SOUND[ev.type]?.();
+
+  // one-shot events: sound + visual juice
+  for (const ev of s.events || []) {
+    if (ev.type === "emote") { spawnEmote(ev.id, ev.emoji); SOUND.emote(); continue; }
+    SOUND[ev.type]?.();
+    if (ev.type === "tag") spawnBurst(ev.x, ev.z, "#fff1f1");
+    else if (ev.type === "web") shake(0.35);
+    else if (ev.type === "ping") shake(0.2);
+  }
+
+  // round just started -> big role banner
+  if (s.state === "playing" && prevState !== "playing") showRoleBanner(!!s.me?.isHunter);
+  // I just got caught (hider -> hunter) -> flash + heavy shake
+  if (s.state === "playing" && prevHunter === false && s.me?.isHunter === true) { flash(0.8); shake(1.8); }
+  prevState = s.state;
+  prevHunter = s.me ? s.me.isHunter : null;
+
   syncEntities(s);
   renderLobby(s);
   renderHUD(s);
@@ -466,6 +592,10 @@ function syncEntities(s) {
     pm.isHunter = p.isHunter;
     pm.ring.visible = p.isHunter && (p.self || p.reveal > 0.05);
     pm.self = p.self;
+    if (!pm.label || pm.labelName !== p.name) {
+      if (pm.label) scene.remove(pm.label);
+      pm.label = makeLabel(p.name, p.color); pm.labelName = p.name; scene.add(pm.label);
+    }
     if (p.x !== null) {
       if (!pm.target) { pm.group.position.set(p.x, 0, p.z); } // snap on first sight
       pm.target = { x: p.x, z: p.z };
@@ -482,6 +612,7 @@ function syncEntities(s) {
   for (const [id, pm] of playerMeshes) {
     if (!seen.has(id)) {
       scene.remove(pm.group);
+      if (pm.label) scene.remove(pm.label);
       pm.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
       playerMeshes.delete(id);
     }
@@ -584,6 +715,8 @@ function renderLobby(s) {
 
   $("hostSettings").classList.toggle("hidden", !isHost);
   $("settingsReadonly").classList.toggle("hidden", isHost);
+  $("botRow").classList.toggle("hidden", !isHost);
+  $("botCount").textContent = s.botCount || 0;
   if (isHost) syncHostControls(s);
   else renderReadonlySettings(s);
 
@@ -603,12 +736,19 @@ function renderHUD(s) {
   const playing = s.state === "playing";
   hud.classList.toggle("hidden", !playing);
   touchControls.classList.toggle("hidden", !(playing && isTouch));
+  $("emoteBar").classList.toggle("hidden", !playing);
   if (!playing) return;
   $("timer").textContent = s.timeLeft;
   const role = $("role");
   const hunter = !!s.me?.isHunter;
   if (hunter) { role.textContent = "🔴 HUNTER — ping, web & tag"; role.className = "role-hunter"; }
   else { role.textContent = "🟢 HIDER — stay unseen, survive"; role.className = "role-hider"; }
+
+  // persistent, glanceable head-count: hiders surviving vs hunters chasing
+  const left = s.hidersLeft ?? 0, total = s.totalPlayers ?? 0, hunters = total - left;
+  $("counter").textContent = left > 0
+    ? `🟢 ${left} hiding · 🔴 ${hunters} hunting`
+    : "all caught!";
 
   // ability chips (desktop / always-visible status)
   $("abilities").classList.toggle("hidden", !hunter);
@@ -656,11 +796,13 @@ const camTarget = new THREE.Vector3();
 const camDesired = new THREE.Vector3();
 const camOffset = new THREE.Vector3(0, 58, 78);
 let lobbyAngle = 0;
+let heartTimer = 0, nowT = 0;
 const clock = new THREE.Clock();
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
+  nowT += dt;
 
   // interpolate player positions + heading, then drive the walk cycle
   for (const pm of playerMeshes.values()) {
@@ -689,10 +831,20 @@ function animate() {
     pm.legR.rotation.x = -swing;
     pm.armL.rotation.x = -swing * 0.8;
     pm.armR.rotation.x = swing * 0.8;
-    // double-frequency vertical bob + forward lean while moving
     pm.rig.position.y = 7 + Math.abs(Math.sin(pm.walkPhase)) * 0.7 * pm.walkAmp;
     pm.rig.rotation.x = -0.18 * pm.walkAmp;
+
+    // name label floats above the head, fades with visibility (not shown for self)
+    if (pm.label) {
+      const op = pm.self ? 0 : (pm.group.visible ? (pm.targetOpacity || 0) : 0);
+      pm.label.material.opacity = op;
+      pm.label.visible = op > 0.04;
+      if (pm.label.visible) pm.label.position.set(pm.group.position.x, 22, pm.group.position.z);
+    }
   }
+
+  updateBursts(dt);
+  updateEmotes(dt);
 
   const me = playerMeshes.get(myId);
   const playing = latest?.state === "playing";
@@ -704,10 +856,28 @@ function animate() {
     camera.lookAt(camTarget.x, 6, camTarget.z);
     selfLight.position.set(me.group.position.x, 22, me.group.position.z);
   } else {
-    // gentle orbit while in lobby / between rounds
     lobbyAngle += dt * 0.12;
     camera.position.set(Math.cos(lobbyAngle) * 210, 150, Math.sin(lobbyAngle) * 210);
     camera.lookAt(0, 0, 0);
+  }
+
+  // screen shake, applied after camera placement
+  if (shakeAmt > 0.02) {
+    camera.position.x += (Math.random() - 0.5) * shakeAmt * 7;
+    camera.position.y += (Math.random() - 0.5) * shakeAmt * 7;
+    camera.position.z += (Math.random() - 0.5) * shakeAmt * 7;
+    shakeAmt *= Math.pow(0.0015, dt);
+  } else shakeAmt = 0;
+
+  // danger vignette + quickening heartbeat (the sound-off tension twin, no direction leak)
+  const danger = (playing && latest?.me && !latest.me.isHunter) ? (latest.me.danger || 0) : 0;
+  if (danger > 0.02) {
+    const pulse = 0.6 + 0.4 * Math.sin(nowT * (6 + danger * 14));
+    dangerEl.style.opacity = String((0.12 + 0.5 * danger) * pulse);
+    heartTimer -= dt;
+    if (heartTimer <= 0) { playHeart(danger); heartTimer = 0.95 - 0.55 * danger; }
+  } else {
+    dangerEl.style.opacity = "0";
   }
 
   renderer.render(scene, camera);

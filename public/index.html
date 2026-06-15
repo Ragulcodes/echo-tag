@@ -10,13 +10,19 @@
   <!-- 3D scene mounts here -->
   <div id="scene"></div>
 
+  <!-- full-screen feedback overlays -->
+  <div id="danger"></div>
+  <div id="flash"></div>
+  <div id="roleBanner" class="hidden"><div id="roleBannerText"></div><div id="roleBannerSub"></div></div>
+
   <!-- LOBBY / MENU -->
   <div id="menu" class="overlay">
     <div class="panel">
       <h1>🔊 ECHO&nbsp;TAG</h1>
       <p class="tag">Total darkness. The only way to see anyone is to ping.</p>
       <input id="nameInput" maxlength="14" placeholder="Your name" />
-      <button id="createBtn" class="primary">Create a room</button>
+      <button id="quickBtn" class="primary">⚡ Quick Play <span class="sub">vs bots, instant</span></button>
+      <button id="createBtn">Create a room for friends</button>
       <div class="row">
         <input id="codeInput" maxlength="4" placeholder="CODE" />
         <button id="joinBtn">Join</button>
@@ -40,8 +46,18 @@
   <div id="lobby" class="overlay hidden">
     <div class="panel">
       <h2>Room <span id="roomCode" class="code"></span></h2>
-      <p class="tag">Share the code (or your WiFi link) with friends.</p>
+      <p class="tag">Share the link with friends — they join in one tap.</p>
+      <button id="copyLinkBtn">🔗 Copy invite link</button>
       <ul id="playerList" class="players"></ul>
+
+      <div id="botRow" class="botRow hidden">
+        <span>Bots</span>
+        <div class="botCtl">
+          <button id="botMinus">−</button>
+          <b id="botCount">0</b>
+          <button id="botPlus">+</button>
+        </div>
+      </div>
 
       <div id="hostSettings" class="settings hidden">
         <div class="setHead">Game settings</div>
@@ -102,10 +118,19 @@
   <div id="hud" class="hidden">
     <div id="timer">90</div>
     <div id="role"></div>
+    <div id="counter"></div>
     <div id="abilities" class="hidden">
       <span id="pingChip" class="chip">PING <kbd>Space</kbd></span>
       <span id="webChip" class="chip">WEB <kbd>Click</kbd></span>
     </div>
+  </div>
+
+  <!-- emote bar (during play) -->
+  <div id="emoteBar" class="hidden">
+    <button data-emote="👋">👋</button>
+    <button data-emote="😱">😱</button>
+    <button data-emote="😎">😎</button>
+    <button data-emote="🎯">🎯</button>
   </div>
 
   <!-- RESULT BANNER -->

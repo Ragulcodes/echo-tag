@@ -10,6 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
+app.get("/healthz", (req, res) => res.type("text").send("ok"));
 app.use(express.static(join(__dirname, "public")));
 
 // ---- fixed tuning ----
@@ -33,6 +34,11 @@ const SMOOCH_DIST = PLAYER_RADIUS * 2 + 2;
 const SMOOCH_CD = 1.6;       // seconds before the same hider can smooch again
 
 const SPEEDS = { slow: 0.72, normal: 1, fast: 1.45 };
+
+const DANGER_RANGE = 115;    // a hider "feels" a hunter within this (sound-off tension cue)
+const BOT_NAMES = ["Nyx", "Echo", "Vesp", "Mochi", "Juno", "Rook", "Zuzu", "Pixel"];
+const BOT_SENSE = 92;        // how close a bot hunter must be to start chasing a hider
+const BOT_FLEE = 78;         // how close a hunter must be before a bot hider bolts
 
 // ---- maps: each bundles size + obstacles + visual theme ----
 function box(x, z, w, d, h) {
@@ -176,10 +182,88 @@ function addPlayer(room, socketId, name) {
     x: pos.x, z: pos.z, heading: 0,
     input: { up: false, down: false, left: false, right: false },
     isHunter: false, reveal: 0, pingCd: 0, webCd: 0, smoochCd: 0, connected: true,
+    isBot: false, aiTimer: 0, aiX: 0, aiZ: 1,
   };
   room.players.set(socketId, player);
   if (!room.hostId) room.hostId = socketId;
   return player;
+}
+
+function addBot(room) {
+  if (room.players.size >= room.settings.maxPlayers) return null;
+  const used = new Set([...room.players.values()].map((p) => p.color));
+  const color = COLORS.find((c) => !used.has(c)) || COLORS[room.players.size % COLORS.length];
+  const usedNames = new Set([...room.players.values()].map((p) => p.name));
+  const name = BOT_NAMES.find((n) => !usedNames.has(n)) || "Bot";
+  const pos = spawnPos(room);
+  const id = "bot_" + Math.random().toString(36).slice(2, 9);
+  const bot = {
+    id, name, color, x: pos.x, z: pos.z, heading: 0,
+    input: { up: false, down: false, left: false, right: false },
+    isHunter: false, reveal: 0, pingCd: 0, webCd: 0, smoochCd: 0, connected: true,
+    isBot: true, aiTimer: 0, aiX: 0, aiZ: 1,
+  };
+  room.players.set(id, bot);
+  return bot;
+}
+
+function removeBot(room) {
+  for (const [id, p] of [...room.players].reverse()) {
+    if (p.isBot) { room.players.delete(id); return true; }
+  }
+  return false;
+}
+
+// simple server-side AI: chase/ping/web as a hunter, flee as a hider, wander otherwise
+function botThink(room, p, dt) {
+  const map = currentMap(room);
+  const others = [...room.players.values()].filter((q) => q.connected && q.id !== p.id);
+  p.aiTimer -= dt;
+  let dx = 0, dz = 0, acting = false;
+
+  if (p.isHunter) {
+    let target = null, td = Infinity;
+    for (const q of others) {
+      if (q.isHunter) continue;
+      const d = Math.hypot(q.x - p.x, q.z - p.z);
+      if ((d < BOT_SENSE || q.reveal > 0.1) && d < td) { td = d; target = q; }
+    }
+    if (target) {
+      acting = true;
+      dx = target.x - p.x; dz = target.z - p.z;
+      if (p.pingCd <= 0 && td < room.settings.pingReach * 0.7) {
+        p.pingCd = room.settings.pingCooldown; p.reveal = 1;
+        room.pings.push({ x: p.x, z: p.z, t: 0, owner: p.id, color: p.color });
+        room.events.push({ type: "ping", x: p.x, z: p.z });
+      }
+      if (p.webCd <= 0 && td < WEB_RANGE * 0.9 && td > TAG_DIST + 3 &&
+          !lineBlocked(p.x, p.z, target.x, target.z, map.obstacles)) {
+        const l = Math.hypot(dx, dz) || 1;
+        p.webCd = room.settings.webCooldown;
+        room.webs.push({ owner: p.id, tx: p.x, tz: p.z, dx: dx / l, dz: dz / l, dist: 0, hit: false, dead: 0, color: p.color });
+        room.events.push({ type: "web", x: p.x, z: p.z });
+      }
+    }
+  } else {
+    let hd = Infinity, hunter = null;
+    for (const q of others) if (q.isHunter) { const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < hd) { hd = d; hunter = q; } }
+    if (hunter && hd < BOT_FLEE) { acting = true; dx = p.x - hunter.x; dz = p.z - hunter.z; }
+  }
+
+  if (!acting) {
+    if (p.aiTimer <= 0) {
+      p.aiTimer = 0.6 + Math.random() * 1.4;
+      const a = Math.random() * Math.PI * 2;
+      p.aiX = Math.cos(a); p.aiZ = Math.sin(a);
+      if (Math.abs(p.x) > map.hx * 0.8) p.aiX = -Math.sign(p.x) * Math.abs(p.aiX);
+      if (Math.abs(p.z) > map.hz * 0.8) p.aiZ = -Math.sign(p.z) * Math.abs(p.aiZ);
+    }
+    dx = p.aiX; dz = p.aiZ;
+  }
+
+  const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+  const th = 0.25;
+  p.input = { right: dx > th, left: dx < -th, down: dz > th, up: dz < -th };
 }
 
 function startRound(room) {
@@ -219,6 +303,8 @@ function tick(room, dt) {
   const obstacles = map.obstacles;
   const speed = BASE_SPEED * (SPEEDS[room.settings.speed] || 1);
   const players = [...room.players.values()];
+
+  for (const p of players) if (p.isBot && p.connected) botThink(room, p, dt);
 
   for (const p of players) {
     if (!p.connected) continue;
@@ -338,12 +424,25 @@ function snapshot(room, forId) {
       connected: p.connected, self: isSelf,
     });
   }
+  // sound-off tension cue: how close is the nearest hunter (hiders only), no direction leak
+  let danger = 0;
+  if (me && !me.isHunter && room.state === "playing") {
+    let nd = Infinity;
+    for (const q of room.players.values()) {
+      if (q.isHunter && q.connected) { const d = Math.hypot(q.x - me.x, q.z - me.z); if (d < nd) nd = d; }
+    }
+    if (nd < DANGER_RANGE) danger = +(1 - nd / DANGER_RANGE).toFixed(2);
+  }
+  const conn = [...room.players.values()].filter((p) => p.connected);
   return {
     state: room.state, code: room.code,
     timeLeft: Math.ceil(room.timeLeft), countdown: Math.ceil(room.countdown),
     winner: room.winner, hostId: room.hostId,
     settings: room.settings, map: mapPayload(room),
-    me: me ? { isHunter: me.isHunter, pingCd: +me.pingCd.toFixed(1), webCd: +me.webCd.toFixed(1) } : null,
+    hidersLeft: conn.filter((p) => !p.isHunter).length,
+    totalPlayers: conn.length,
+    botCount: conn.filter((p) => p.isBot).length,
+    me: me ? { isHunter: me.isHunter, pingCd: +me.pingCd.toFixed(1), webCd: +me.webCd.toFixed(1), danger } : null,
     players,
     pings: room.pings.map((ping) => ({
       x: +ping.x.toFixed(1), z: +ping.z.toFixed(1),
@@ -371,9 +470,11 @@ function ensureLoop(room) {
     const dt = Math.min(0.1, (now - room.lastTick) / 1000);
     room.lastTick = now;
     tick(room, dt);
-    for (const id of room.players.keys()) io.to(id).emit("state", snapshot(room, id));
+    for (const p of room.players.values()) if (!p.isBot) io.to(p.id).emit("state", snapshot(room, p.id));
     room.events = []; // one-shot events delivered; clear for next tick
-    if (room.players.size === 0) { clearInterval(room.loop); room.loop = null; rooms.delete(room.code); }
+    // tear the room down once no humans remain (bots alone don't keep it alive)
+    const humans = [...room.players.values()].filter((p) => !p.isBot).length;
+    if (humans === 0) { clearInterval(room.loop); room.loop = null; rooms.delete(room.code); }
   }, 1000 / TICK_HZ);
 }
 
@@ -423,6 +524,32 @@ io.on("connection", (socket) => {
     if (room.state !== "lobby" || room.players.size < 2) return;
     room.state = "countdown";
     room.countdown = LOBBY_COUNTDOWN;
+  });
+
+  // instant match: fill with bots and start right away
+  socket.on("quickplay", () => {
+    const room = rooms.get(roomCode);
+    if (!room || room.hostId !== socket.id || room.state !== "lobby") return;
+    while (room.players.size < 4) if (!addBot(room)) break;
+    if (room.players.size >= 2) { room.state = "countdown"; room.countdown = LOBBY_COUNTDOWN; }
+  });
+
+  socket.on("addBot", () => {
+    const room = rooms.get(roomCode);
+    if (room && room.hostId === socket.id && room.state === "lobby") addBot(room);
+  });
+  socket.on("removeBot", () => {
+    const room = rooms.get(roomCode);
+    if (room && room.hostId === socket.id && room.state === "lobby") removeBot(room);
+  });
+
+  socket.on("emote", (e) => {
+    const room = rooms.get(roomCode);
+    if (!room) return;
+    const p = room.players.get(socket.id);
+    if (!p) return;
+    const emoji = (typeof e === "string" ? e : (e && e.emoji) || "").slice(0, 4);
+    if (emoji) room.events.push({ type: "emote", id: p.id, emoji });
   });
 
   socket.on("input", (input) => {

@@ -179,3 +179,59 @@ button.primary:hover { filter: brightness(1.08); }
   background: rgba(120,200,255,0.22); border: 2px solid #7fc8ff; color: #fff;
   font-weight: 800; letter-spacing: 1px; pointer-events: auto;
 }
+
+/* menu / lobby extras */
+button .sub { display: block; font-size: 11px; font-weight: 600; opacity: 0.85; margin-top: 2px; }
+#copyLinkBtn { margin-bottom: 14px; background: #14233a; color: #7fe9ff; }
+#copyLinkBtn.copied { background: rgba(52,211,153,0.2); color: #34d399; }
+.botRow { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #0b0c16; border: 1px solid #23253a; border-radius: 12px; margin-bottom: 14px; font-size: 14px; }
+.botCtl { display: flex; align-items: center; gap: 12px; }
+.botCtl button { width: 38px; height: 38px; padding: 0; font-size: 22px; border-radius: 10px; }
+.botCtl b { color: var(--accent); min-width: 16px; text-align: center; }
+
+/* hiders-left counter */
+#counter { font-size: 14px; font-weight: 700; color: var(--text); opacity: 0.92; text-shadow: 0 1px 6px rgba(0,0,0,0.9); }
+
+/* danger vignette — the sound-off tension twin */
+#danger {
+  position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0;
+  box-shadow: inset 0 0 140px 50px rgba(255,40,60,0.9);
+  transition: opacity 0.12s linear;
+}
+
+/* hit flash */
+#flash {
+  position: fixed; inset: 0; z-index: 8; pointer-events: none;
+  background: #fff; opacity: 0; transition: opacity 0.28s ease-out;
+}
+
+/* role reveal banner */
+#roleBanner {
+  position: fixed; inset: 0; z-index: 9; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+#roleBannerText { font-size: clamp(40px, 11vw, 100px); font-weight: 900; letter-spacing: 3px; opacity: 0; }
+#roleBannerSub { font-size: clamp(14px, 3vw, 22px); font-weight: 700; color: var(--text); opacity: 0; margin-top: 8px; }
+#roleBanner.show #roleBannerText { animation: bannerPop 2.2s ease-out forwards; }
+#roleBanner.show #roleBannerSub { animation: bannerFade 2.2s ease-out forwards; }
+#roleBanner.hunter #roleBannerText { color: #fb5566; text-shadow: 0 0 40px rgba(251,85,102,0.7); }
+#roleBanner.hider #roleBannerText { color: #34d399; text-shadow: 0 0 40px rgba(52,211,153,0.7); }
+@keyframes bannerPop {
+  0% { transform: scale(0.4); opacity: 0; }
+  15% { transform: scale(1.08); opacity: 1; }
+  30% { transform: scale(1); opacity: 1; }
+  75% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+@keyframes bannerFade { 0%,12% { opacity: 0; } 30%,75% { opacity: 0.85; } 100% { opacity: 0; } }
+
+/* emote bar */
+#emoteBar {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; gap: 8px; z-index: 6;
+}
+#emoteBar button {
+  width: 52px; height: 52px; padding: 0; font-size: 26px; border-radius: 50%;
+  background: rgba(20,24,40,0.7); border: 1px solid rgba(255,255,255,0.12);
+}
+@media (pointer: coarse) { #emoteBar { bottom: 150px; } }
