@@ -70,6 +70,60 @@ const MAPS = {
       box(0, 0, 22, 10, 18),
     ],
   },
+  // ---- themed arenas (original art, dark so ping-to-see still matters) ----
+  voxel: {
+    name: "Voxel Lawn", theme: "voxel", hx: 140, hz: 100,
+    obstacles: [
+      box(-60, -40, 16, 16, 16), box(40, -60, 20, 20, 22), box(70, 30, 14, 14, 30),
+      box(-30, 50, 18, 18, 18), box(20, 10, 14, 14, 14), box(-95, 20, 16, 16, 24),
+      box(95, -20, 16, 16, 16), box(0, -15, 12, 12, 12),
+    ],
+  },
+  galactic: {
+    name: "Galactic Station", theme: "galactic", hx: 150, hz: 100,
+    obstacles: [
+      box(-70, 0, 10, 44, 18), box(70, 0, 10, 44, 18),
+      box(0, -58, 64, 8, 16), box(0, 58, 64, 8, 16),
+      box(-35, -25, 14, 14, 20), box(35, 25, 14, 14, 20),
+    ],
+  },
+  herocity: {
+    name: "Hero City", theme: "herocity", hx: 152, hz: 106,
+    obstacles: [
+      box(-80, -50, 22, 22, 46), box(60, -40, 26, 26, 54), box(-50, 40, 20, 20, 40),
+      box(40, 55, 24, 24, 44), box(0, 0, 18, 18, 34), box(98, 22, 20, 20, 48),
+      box(-100, 32, 18, 18, 38),
+    ],
+  },
+  battle: {
+    name: "Battlegrounds", theme: "battle", hx: 156, hz: 106,
+    obstacles: [
+      box(-60, -30, 18, 18, 14), box(20, -52, 16, 16, 12), box(72, 20, 18, 18, 14),
+      box(-30, 42, 16, 16, 12), box(0, 0, 30, 8, 14), box(-98, 10, 8, 42, 14),
+    ],
+  },
+  upside: {
+    name: "The Upside Down", theme: "upsidedown", hx: 144, hz: 100,
+    obstacles: [
+      box(-50, -30, 6, 6, 42), box(30, -55, 6, 6, 46), box(72, 25, 6, 6, 38),
+      box(-30, 45, 6, 6, 42), box(10, 5, 6, 6, 36), box(-86, 15, 6, 6, 44),
+      box(92, -15, 6, 6, 40), box(45, -10, 6, 6, 34),
+    ],
+  },
+  squid: {
+    name: "Squid Arena", theme: "squidgame", hx: 140, hz: 95,
+    obstacles: [
+      box(-70, -40, 20, 20, 18), box(0, -40, 20, 20, 18), box(70, -40, 20, 20, 18),
+      box(-35, 30, 20, 20, 18), box(35, 30, 20, 20, 18), box(0, 0, 16, 16, 24),
+    ],
+  },
+  grid: {
+    name: "The Grid", theme: "grid", hx: 150, hz: 100,
+    obstacles: [
+      box(-60, -40, 8, 44, 16), box(60, 40, 8, 44, 16),
+      box(-60, 40, 44, 8, 16), box(60, -40, 44, 8, 16), box(0, 0, 10, 10, 26),
+    ],
+  },
 };
 const MAP_IDS = Object.keys(MAPS);
 

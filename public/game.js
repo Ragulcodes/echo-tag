@@ -27,6 +27,7 @@ if (!VIEW_ORDER.includes(viewMode)) viewMode = "third";
 // PUBG-style look state (shared by input + camera)
 let camYaw = 0, camPitch = 0.5, pointerLocked = false;
 const PITCH_MIN = -1.15, PITCH_MAX = 1.2;
+const TURN_RATE = 2.4; // rad/sec when turning with A/D
 function setView(mode) {
   viewMode = mode;
   localStorage.setItem("echotag_view", mode);
@@ -77,6 +78,14 @@ const THEMES = {
   void:  { bg: 0x07050d, ground: 0x0e0a18, grid: 0x3a2a58, gridDim: 0x201838, wall: 0x8a5fae, fog: 0.0072 },
   ice:   { bg: 0x050a0d, ground: 0x0a1016, grid: 0x2a4a58, gridDim: 0x183038, wall: 0x4f9eb6, fog: 0.0060 },
   amber: { bg: 0x0b0805, ground: 0x161009, grid: 0x584a2a, gridDim: 0x342a18, wall: 0xb6864f, fog: 0.0070 },
+  // themed arenas
+  voxel:      { bg: 0x0a1207, ground: 0x10220c, grid: 0x2f5a26, gridDim: 0x1c3a18, wall: 0x5fae4f, fog: 0.0062 },
+  galactic:   { bg: 0x05060f, ground: 0x0a0c1a, grid: 0x2a3a6a, gridDim: 0x16203e, wall: 0x6f8fff, fog: 0.0058, decor: "stars", starColor: 0xbfd4ff },
+  herocity:   { bg: 0x0b0a07, ground: 0x14110c, grid: 0x4a3a22, gridDim: 0x2a2214, wall: 0xd98a3a, fog: 0.0068 },
+  battle:     { bg: 0x0a0b07, ground: 0x14160d, grid: 0x4a4a2a, gridDim: 0x2c2c18, wall: 0x9ea14f, fog: 0.0066 },
+  upsidedown: { bg: 0x0a0405, ground: 0x150a0c, grid: 0x5a2230, gridDim: 0x381820, wall: 0xc0455f, fog: 0.0086, decor: "spores", starColor: 0xff5d6c },
+  squidgame:  { bg: 0x0c0710, ground: 0x16101c, grid: 0x6a2a58, gridDim: 0x3a1838, wall: 0xff6ec7, fog: 0.0062 },
+  grid:       { bg: 0x04080a, ground: 0x081016, grid: 0x1f7a8a, gridDim: 0x103840, wall: 0x35e0ff, fog: 0.0056, decor: "stars", starColor: 0x9fe9ff },
 };
 
 const scene = new THREE.Scene();
@@ -107,6 +116,31 @@ const wallGroup = new THREE.Group();
 scene.add(wallGroup);
 const obstacleGroup = new THREE.Group();
 scene.add(obstacleGroup);
+const decorGroup = new THREE.Group(); // per-theme flavor (starfield / spores)
+scene.add(decorGroup);
+
+// scatter glowing points either high overhead (stars) or through the arena (spores)
+function buildDecor(kind, color) {
+  decorGroup.clear();
+  if (!kind) return;
+  const n = kind === "stars" ? 380 : 220;
+  const pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    if (kind === "stars") {
+      pos[i * 3] = (Math.random() - 0.5) * 900;
+      pos[i * 3 + 1] = 120 + Math.random() * 320;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 900;
+    } else { // spores drift through the play space
+      pos[i * 3] = (Math.random() - 0.5) * world.hx * 2;
+      pos[i * 3 + 1] = 4 + Math.random() * 60;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * world.hz * 2;
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const m = new THREE.PointsMaterial({ color, size: kind === "stars" ? 2.2 : 1.6, transparent: true, opacity: kind === "stars" ? 0.9 : 0.6, sizeAttenuation: true });
+  decorGroup.add(new THREE.Points(g, m));
+}
 
 let currentMapId = null;
 let currentTheme = "neon";
@@ -161,6 +195,7 @@ function applyMap(map) {
     e.position.set(b.x, b.h / 2, b.z);
     obstacleGroup.add(e);
   }
+  buildDecor(th.decor, th.starColor || 0xffffff);
   currentMapId = map.id;
 }
 
@@ -423,6 +458,10 @@ socket.on("connect", () => { if (lastJoin) socket.emit("join", lastJoin, (res) =
 const MAP_LIST = [
   { id: "open", label: "Open Field" }, { id: "pillars", label: "Pillars" },
   { id: "maze", label: "The Maze" }, { id: "close", label: "Close Quarters" },
+  { id: "voxel", label: "Voxel Lawn" }, { id: "galactic", label: "Galactic Station" },
+  { id: "herocity", label: "Hero City" }, { id: "battle", label: "Battlegrounds" },
+  { id: "upside", label: "The Upside Down" }, { id: "squid", label: "Squid Arena" },
+  { id: "grid", label: "The Grid" },
 ];
 const SPEED_LIST = ["slow", "normal", "fast"];
 
@@ -492,11 +531,11 @@ let lastInputSent = -1;
 const EMOTES = ["👋", "😱", "😎", "🎯"];
 const KEY_MOVE = { KeyW: "w", ArrowUp: "w", KeyS: "s", ArrowDown: "s", KeyA: "a", ArrowLeft: "a", KeyD: "d", ArrowRight: "d" };
 
-const effLook = () => (viewMode === "top" ? 0 : camYaw); // top view = world-relative
 function sendInput() {
   const f = (held.w ? 1 : 0) - (held.s ? 1 : 0);
-  const st = (held.d ? 1 : 0) - (held.a ? 1 : 0);
-  socket.emit("input", { f, st, look: effLook() });
+  // follow views: A/D turn the camera (no strafe). top-down: A/D strafe, world-relative.
+  const st = viewMode === "top" ? (held.d ? 1 : 0) - (held.a ? 1 : 0) : 0;
+  socket.emit("input", { f, st, look: viewMode === "top" ? 0 : camYaw });
 }
 
 window.addEventListener("keydown", (e) => {
@@ -889,12 +928,18 @@ function animate() {
 
   updateBursts(dt);
   updateEmotes(dt);
+  decorGroup.rotation.y += dt * 0.02; // slow drift for stars / spores
 
   const me = playerMeshes.get(myId);
   const playing = latest?.state === "playing";
 
   if (playing && me && me.target) {
     const px = me.group.position.x, pz = me.group.position.z;
+    // A/D rotate your facing + the camera (you stay centered, the world turns around you)
+    if (viewMode !== "top") {
+      const turn = (held.d ? 1 : 0) - (held.a ? 1 : 0);
+      if (turn) camYaw += turn * TURN_RATE * dt;
+    }
     if (viewMode === "top") {
       camDesired.set(px, 170, pz + 0.001);
       lookPoint.set(px, 0, pz);

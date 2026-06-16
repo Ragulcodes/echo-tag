@@ -41,6 +41,9 @@ assert(a.last.settings.pingCooldown === 3, "host config sets ping cooldown to 3"
 a.s.emit("config", { mapId: "pillars" });
 await sleep(120);
 assert(a.last.map.id === "pillars" && a.last.map.obstacles.length > 0, "host can switch map (obstacles present)");
+a.s.emit("config", { mapId: "galactic" });
+await sleep(120);
+assert(a.last.map.id === "galactic" && a.last.map.obstacles.length > 0, "host can switch to a themed arena (galactic)");
 a.s.emit("config", { maxPlayers: 4, roundSeconds: 60, speed: "fast", glowRadius: 30 });
 await sleep(120);
 assert(a.last.settings.maxPlayers === 4, "host sets max players");
