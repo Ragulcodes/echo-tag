@@ -19,6 +19,18 @@ const inviteRoom = (new URLSearchParams(location.search).get("room") || "").toUp
 if (inviteRoom) $("codeInput").value = inviteRoom;
 let lastJoin = null; // {code, name} for reconnect
 
+// camera point-of-view: third (follow) | top (overhead) | first (eyes)
+const VIEW_ORDER = ["third", "top", "first"];
+const VIEW_LABEL = { third: "👁 3rd", top: "👁 Top", first: "👁 1st" };
+let viewMode = localStorage.getItem("echotag_view") || "third";
+if (!VIEW_ORDER.includes(viewMode)) viewMode = "third";
+function setView(mode) {
+  viewMode = mode;
+  localStorage.setItem("echotag_view", mode);
+  $("viewBtn").textContent = VIEW_LABEL[mode];
+}
+function cycleView() { setView(VIEW_ORDER[(VIEW_ORDER.indexOf(viewMode) + 1) % VIEW_ORDER.length]); }
+
 // ------------------------------------------------------------------- audio
 let actx = null;
 function initAudio() {
@@ -397,6 +409,9 @@ $("botMinus").onclick = () => socket.emit("removeBot");
 document.querySelectorAll("#emoteBar button").forEach((b) =>
   b.addEventListener("click", () => { initAudio(); socket.emit("emote", b.dataset.emote); }));
 
+$("viewBtn").onclick = () => cycleView();
+setView(viewMode); // initialise the button label
+
 // reconnect: if the socket drops then returns mid-session, silently rejoin the same room
 socket.on("connect", () => { if (lastJoin) socket.emit("join", lastJoin, (res) => { if (res && !res.error) myId = res.id; }); });
 
@@ -477,6 +492,7 @@ const EMOTES = ["👋", "😱", "😎", "🎯"];
 window.addEventListener("keydown", (e) => {
   initAudio();
   if (e.code === "Space") { firePing(); e.preventDefault(); return; }
+  if (e.code === "KeyV") { cycleView(); return; }
   if (/^Digit[1-4]$/.test(e.code) && latest?.state === "playing") { socket.emit("emote", EMOTES[+e.code.slice(5) - 1]); return; }
   const k = keyMap[e.code];
   if (k && !keys[k]) { keys[k] = true; sendInput(); }
@@ -737,6 +753,7 @@ function renderHUD(s) {
   hud.classList.toggle("hidden", !playing);
   touchControls.classList.toggle("hidden", !(playing && isTouch));
   $("emoteBar").classList.toggle("hidden", !playing);
+  $("viewBtn").classList.toggle("hidden", !playing);
   if (!playing) return;
   $("timer").textContent = s.timeLeft;
   const role = $("role");
@@ -795,6 +812,9 @@ function escapeHtml(s) {
 const camTarget = new THREE.Vector3();
 const camDesired = new THREE.Vector3();
 const camOffset = new THREE.Vector3(0, 58, 78);
+const lookPoint = new THREE.Vector3();
+const UP_Y = new THREE.Vector3(0, 1, 0);
+const UP_Z = new THREE.Vector3(0, 0, -1); // "up" for the top-down view (avoids a degenerate look)
 let lobbyAngle = 0;
 let heartTimer = 0, nowT = 0;
 const clock = new THREE.Clock();
@@ -850,12 +870,29 @@ function animate() {
   const playing = latest?.state === "playing";
 
   if (playing && me && me.target) {
-    camDesired.copy(me.group.position).add(camOffset);
-    camera.position.lerp(camDesired, Math.min(1, dt * 4));
-    camTarget.lerp(me.group.position, Math.min(1, dt * 6));
-    camera.lookAt(camTarget.x, 6, camTarget.z);
-    selfLight.position.set(me.group.position.x, 22, me.group.position.z);
+    const px = me.group.position.x, pz = me.group.position.z, rot = me.group.rotation.y;
+    if (viewMode === "top") {
+      camDesired.set(px, 170, pz + 0.001);
+      lookPoint.set(px, 0, pz);
+      camera.up.copy(UP_Z);
+    } else if (viewMode === "first") {
+      const fx = Math.sin(rot), fz = -Math.cos(rot); // facing/heading direction
+      camDesired.set(px - fx * 1.2, 12.5, pz - fz * 1.2);
+      lookPoint.set(px + fx * 30, 10.5, pz + fz * 30);
+      camera.up.copy(UP_Y);
+    } else { // third-person follow
+      camDesired.copy(me.group.position).add(camOffset);
+      lookPoint.set(px, 6, pz);
+      camera.up.copy(UP_Y);
+    }
+    const posK = viewMode === "first" ? Math.min(1, dt * 12) : Math.min(1, dt * 4);
+    camera.position.lerp(camDesired, posK);
+    camTarget.lerp(lookPoint, Math.min(1, dt * 8));
+    camera.lookAt(camTarget);
+    selfLight.position.set(px, 22, pz);
+    me.group.visible = viewMode !== "first"; // hide your own model in first person
   } else {
+    camera.up.copy(UP_Y);
     lobbyAngle += dt * 0.12;
     camera.position.set(Math.cos(lobbyAngle) * 210, 150, Math.sin(lobbyAngle) * 210);
     camera.lookAt(0, 0, 0);
