@@ -24,10 +24,14 @@ const VIEW_ORDER = ["third", "top", "first"];
 const VIEW_LABEL = { third: "👁 3rd", top: "👁 Top", first: "👁 1st" };
 let viewMode = localStorage.getItem("echotag_view") || "third";
 if (!VIEW_ORDER.includes(viewMode)) viewMode = "third";
+// PUBG-style look state (shared by input + camera)
+let camYaw = 0, camPitch = 0.5, pointerLocked = false;
+const PITCH_MIN = -1.15, PITCH_MAX = 1.2;
 function setView(mode) {
   viewMode = mode;
   localStorage.setItem("echotag_view", mode);
   $("viewBtn").textContent = VIEW_LABEL[mode];
+  if (mode === "top" && pointerLocked) document.exitPointerLock?.();
 }
 function cycleView() { setView(VIEW_ORDER[(VIEW_ORDER.indexOf(viewMode) + 1) % VIEW_ORDER.length]); }
 
@@ -481,40 +485,48 @@ function renderReadonlySettings(s) {
 }
 function row(k, v) { return `<div class="ro"><span>${k}</span><b>${v}</b></div>`; }
 
-// ----------------------------------------------------------------------- input
-const keys = { up: false, down: false, left: false, right: false };
-const keyMap = {
-  ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down",
-  ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
-};
-const sendInput = () => socket.emit("input", keys);
+// --------------------------------------------------- input (PUBG-style)
+// WASD = forward/strafe relative to where you look; mouse (pointer lock) looks.
+const held = { w: false, a: false, s: false, d: false };
+let lastInputSent = -1;
 const EMOTES = ["👋", "😱", "😎", "🎯"];
+const KEY_MOVE = { KeyW: "w", ArrowUp: "w", KeyS: "s", ArrowDown: "s", KeyA: "a", ArrowLeft: "a", KeyD: "d", ArrowRight: "d" };
+
+const effLook = () => (viewMode === "top" ? 0 : camYaw); // top view = world-relative
+function sendInput() {
+  const f = (held.w ? 1 : 0) - (held.s ? 1 : 0);
+  const st = (held.d ? 1 : 0) - (held.a ? 1 : 0);
+  socket.emit("input", { f, st, look: effLook() });
+}
+
 window.addEventListener("keydown", (e) => {
   initAudio();
   if (e.code === "Space") { firePing(); e.preventDefault(); return; }
   if (e.code === "KeyV") { cycleView(); return; }
   if (/^Digit[1-4]$/.test(e.code) && latest?.state === "playing") { socket.emit("emote", EMOTES[+e.code.slice(5) - 1]); return; }
-  const k = keyMap[e.code];
-  if (k && !keys[k]) { keys[k] = true; sendInput(); }
+  const k = KEY_MOVE[e.code];
+  if (k && !held[k]) { held[k] = true; sendInput(); }
 });
 window.addEventListener("keyup", (e) => {
-  const k = keyMap[e.code];
-  if (k && keys[k]) { keys[k] = false; sendInput(); }
+  const k = KEY_MOVE[e.code];
+  if (k && held[k]) { held[k] = false; sendInput(); }
 });
-function firePing() {
-  if (latest?.me?.isHunter && latest.me.pingCd === 0) socket.emit("ping");
-}
-function fireWeb(dx, dz) {
-  if (latest?.me?.isHunter && latest.me.webCd === 0) socket.emit("web", { dx, dz });
-}
-// fire a web in the direction the hunter is facing (used by touch / fallback)
-function fireWebFacing() {
-  const me = playerMeshes.get(myId);
-  if (!me) return;
-  fireWeb(Math.sin(me.group.rotation.y), -Math.cos(me.group.rotation.y));
-}
 
-// desktop: aim the web with the mouse (raycast cursor onto the ground)
+function firePing() { if (latest?.me?.isHunter && latest.me.pingCd === 0) socket.emit("ping"); }
+function fireWeb(dx, dz) { if (latest?.me?.isHunter && latest.me.webCd === 0) socket.emit("web", { dx, dz }); }
+const fireWebForward = () => fireWeb(Math.sin(camYaw), -Math.cos(camYaw)); // toward the crosshair
+
+// desktop mouse-look via pointer lock (1st & 3rd person)
+const LOOK_SENS = 0.0026;
+const canvas = renderer.domElement;
+document.addEventListener("pointerlockchange", () => { pointerLocked = document.pointerLockElement === canvas; });
+window.addEventListener("mousemove", (e) => {
+  if (!pointerLocked) return;
+  camYaw -= e.movementX * LOOK_SENS;
+  camPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, camPitch + e.movementY * LOOK_SENS));
+});
+
+// top-view aims the web by raycasting the cursor onto the ground (no lock there)
 const raycaster = new THREE.Raycaster();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const ndc = new THREE.Vector2();
@@ -522,39 +534,33 @@ const hitPoint = new THREE.Vector3();
 window.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
   initAudio();
-  const me = playerMeshes.get(myId);
-  if (!latest || latest.state !== "playing" || !me) return;
-  ndc.x = (e.clientX / window.innerWidth) * 2 - 1;
-  ndc.y = -(e.clientY / window.innerHeight) * 2 + 1;
-  raycaster.setFromCamera(ndc, camera);
-  if (raycaster.ray.intersectPlane(groundPlane, hitPoint)) {
-    fireWeb(hitPoint.x - me.group.position.x, hitPoint.z - me.group.position.z);
-  } else {
-    fireWebFacing();
+  if (!latest || latest.state !== "playing") return;
+  if (viewMode === "top") {
+    const me = playerMeshes.get(myId); if (!me) return;
+    ndc.x = (e.clientX / window.innerWidth) * 2 - 1;
+    ndc.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    if (raycaster.ray.intersectPlane(groundPlane, hitPoint)) fireWeb(hitPoint.x - me.group.position.x, hitPoint.z - me.group.position.z);
+    return;
   }
+  // 1st/3rd: first click captures the mouse; while captured, click fires forward
+  if (!pointerLocked) canvas.requestPointerLock?.();
+  else fireWebForward();
 });
 
-// touch joystick
+// touch: left joystick moves (relative to look), right half of the screen looks
 let joyId = null;
 const joy = $("joystick"), stick = $("stick");
 function setJoy(dx, dy) {
-  const dead = 0.28, n = Math.hypot(dx, dy);
+  const dead = 0.22, n = Math.hypot(dx, dy);
   const nx = n > 0 ? dx / n : 0, ny = n > 0 ? dy / n : 0, mag = Math.min(n / 50, 1);
-  const next = {
-    up: ny < -dead && mag > dead, down: ny > dead && mag > dead,
-    left: nx < -dead && mag > dead, right: nx > dead && mag > dead,
-  };
-  if (next.up !== keys.up || next.down !== keys.down || next.left !== keys.left || next.right !== keys.right) {
-    Object.assign(keys, next); sendInput();
-  }
+  held.w = ny < -dead && mag > dead; held.s = ny > dead && mag > dead;
+  held.d = nx > dead && mag > dead;  held.a = nx < -dead && mag > dead;
+  sendInput();
   const cm = Math.min(n, 50);
   stick.style.transform = `translate(calc(-50% + ${nx * cm}px), calc(-50% + ${ny * cm}px))`;
 }
-function resetJoy() {
-  Object.assign(keys, { up: false, down: false, left: false, right: false });
-  sendInput();
-  stick.style.transform = "translate(-50%, -50%)";
-}
+function resetJoy() { held.w = held.a = held.s = held.d = false; sendInput(); stick.style.transform = "translate(-50%, -50%)"; }
 joy.addEventListener("touchstart", (e) => {
   const t = e.changedTouches[0]; joyId = t.identifier;
   const r = joy.getBoundingClientRect();
@@ -568,8 +574,24 @@ joy.addEventListener("touchmove", (e) => {
 const endJoy = (e) => { for (const t of e.changedTouches) if (t.identifier === joyId) { joyId = null; resetJoy(); } };
 joy.addEventListener("touchend", endJoy);
 joy.addEventListener("touchcancel", endJoy);
+
+const lookPad = $("lookPad");
+let lookId = null, lookX = 0, lookY = 0;
+lookPad.addEventListener("touchstart", (e) => { const t = e.changedTouches[0]; lookId = t.identifier; lookX = t.clientX; lookY = t.clientY; e.preventDefault(); }, { passive: false });
+lookPad.addEventListener("touchmove", (e) => {
+  for (const t of e.changedTouches) if (t.identifier === lookId) {
+    camYaw -= (t.clientX - lookX) * 0.006;
+    camPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, camPitch + (t.clientY - lookY) * 0.006));
+    lookX = t.clientX; lookY = t.clientY;
+  }
+  e.preventDefault();
+}, { passive: false });
+const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
+lookPad.addEventListener("touchend", endLook);
+lookPad.addEventListener("touchcancel", endLook);
+
 $("pingBtn").addEventListener("touchstart", (e) => { initAudio(); firePing(); e.preventDefault(); }, { passive: false });
-$("webBtn").addEventListener("touchstart", (e) => { initAudio(); fireWebFacing(); e.preventDefault(); }, { passive: false });
+$("webBtn").addEventListener("touchstart", (e) => { initAudio(); fireWebForward(); e.preventDefault(); }, { passive: false });
 
 // --------------------------------------------------------------- server state
 let prevState = null, prevHunter = null;
@@ -754,6 +776,8 @@ function renderHUD(s) {
   touchControls.classList.toggle("hidden", !(playing && isTouch));
   $("emoteBar").classList.toggle("hidden", !playing);
   $("viewBtn").classList.toggle("hidden", !playing);
+  $("crosshair").classList.toggle("hidden", !(playing && viewMode !== "top"));
+  $("lookPad").classList.toggle("hidden", !(playing && isTouch && viewMode !== "top"));
   if (!playing) return;
   $("timer").textContent = s.timeLeft;
   const role = $("role");
@@ -870,27 +894,33 @@ function animate() {
   const playing = latest?.state === "playing";
 
   if (playing && me && me.target) {
-    const px = me.group.position.x, pz = me.group.position.z, rot = me.group.rotation.y;
+    const px = me.group.position.x, pz = me.group.position.z;
     if (viewMode === "top") {
       camDesired.set(px, 170, pz + 0.001);
       lookPoint.set(px, 0, pz);
       camera.up.copy(UP_Z);
     } else if (viewMode === "first") {
-      const fx = Math.sin(rot), fz = -Math.cos(rot); // facing/heading direction
-      camDesired.set(px - fx * 1.2, 12.5, pz - fz * 1.2);
-      lookPoint.set(px + fx * 30, 10.5, pz + fz * 30);
+      // eye at the head, look along yaw/pitch
+      const cp = Math.cos(camPitch);
+      camDesired.set(px, 12.5, pz);
+      lookPoint.set(px + Math.sin(camYaw) * cp * 30, 12.5 + Math.sin(camPitch) * 30, pz - Math.cos(camYaw) * cp * 30);
       camera.up.copy(UP_Y);
-    } else { // third-person follow
-      camDesired.copy(me.group.position).add(camOffset);
-      lookPoint.set(px, 6, pz);
+    } else { // third-person orbit behind the look direction
+      const pitch = Math.min(1.2, Math.max(0.12, camPitch));
+      const cp = Math.cos(pitch), dist = 72;
+      camDesired.set(px - Math.sin(camYaw) * dist * cp, 12 + Math.sin(pitch) * dist, pz + Math.cos(camYaw) * dist * cp);
+      lookPoint.set(px, 8, pz);
       camera.up.copy(UP_Y);
     }
-    const posK = viewMode === "first" ? Math.min(1, dt * 12) : Math.min(1, dt * 4);
+    const posK = viewMode === "first" ? Math.min(1, dt * 14) : Math.min(1, dt * 5);
     camera.position.lerp(camDesired, posK);
-    camTarget.lerp(lookPoint, Math.min(1, dt * 8));
+    camTarget.lerp(lookPoint, Math.min(1, dt * 10));
     camera.lookAt(camTarget);
     selfLight.position.set(px, 22, pz);
     me.group.visible = viewMode !== "first"; // hide your own model in first person
+
+    // resend input ~20Hz so the server tracks camera-relative movement as you look around
+    if (nowT - lastInputSent > 0.05) { sendInput(); lastInputSent = nowT; }
   } else {
     camera.up.copy(UP_Y);
     lobbyAngle += dt * 0.12;

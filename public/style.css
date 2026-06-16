@@ -244,3 +244,13 @@ button .sub { display: block; font-size: 11px; font-weight: 600; opacity: 0.85; 
   color: #cdd2e6; pointer-events: auto;
 }
 @media (pointer: coarse) { #viewBtn { top: 12px; right: 12px; padding: 11px 14px; } }
+
+/* aim crosshair */
+#crosshair {
+  position: fixed; left: 50%; top: 50%; width: 10px; height: 10px;
+  transform: translate(-50%, -50%); z-index: 5; pointer-events: none;
+  border: 2px solid rgba(255,255,255,0.7); border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0,0,0,0.8);
+}
+/* mobile look pad — invisible drag region on the right half */
+#lookPad { position: fixed; right: 0; top: 0; width: 50%; height: 100%; z-index: 3; pointer-events: auto; touch-action: none; }

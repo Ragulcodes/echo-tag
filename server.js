@@ -180,7 +180,7 @@ function addPlayer(room, socketId, name) {
   const player = {
     id: socketId, name: (name || "Player").slice(0, 14), color,
     x: pos.x, z: pos.z, heading: 0,
-    input: { up: false, down: false, left: false, right: false },
+    f: 0, st: 0, lookHeading: 0, // forward/strafe axes + look (camera) yaw
     isHunter: false, reveal: 0, pingCd: 0, webCd: 0, smoochCd: 0, connected: true,
     isBot: false, aiTimer: 0, aiX: 0, aiZ: 1,
   };
@@ -199,7 +199,7 @@ function addBot(room) {
   const id = "bot_" + Math.random().toString(36).slice(2, 9);
   const bot = {
     id, name, color, x: pos.x, z: pos.z, heading: 0,
-    input: { up: false, down: false, left: false, right: false },
+    f: 0, st: 0, lookHeading: 0,
     isHunter: false, reveal: 0, pingCd: 0, webCd: 0, smoochCd: 0, connected: true,
     isBot: true, aiTimer: 0, aiX: 0, aiZ: 1,
   };
@@ -262,8 +262,8 @@ function botThink(room, p, dt) {
   }
 
   const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
-  const th = 0.25;
-  p.input = { right: dx > th, left: dx < -th, down: dz > th, up: dz < -th };
+  p.lookHeading = Math.atan2(dx, -dz); // face the chosen direction
+  p.f = 1; p.st = 0;                    // and walk forward along it
 }
 
 function startRound(room) {
@@ -308,11 +308,13 @@ function tick(room, dt) {
 
   for (const p of players) {
     if (!p.connected) continue;
-    let dx = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
-    let dz = (p.input.down ? 1 : 0) - (p.input.up ? 1 : 0);
+    // forward/strafe are relative to the look (camera) yaw -> camera-relative movement
+    const yaw = p.lookHeading || 0;
+    let dx = Math.sin(yaw) * p.f + Math.cos(yaw) * p.st;
+    let dz = -Math.cos(yaw) * p.f + Math.sin(yaw) * p.st;
     const len = Math.hypot(dx, dz);
-    if (len > 0) { dx /= len; dz /= len; p.heading = Math.atan2(dx, -dz); }
-    // move per-axis then resolve, so players slide along walls
+    if (len > 1) { dx /= len; dz /= len; }
+    p.heading = yaw; // body faces where you look (strafe-capable)
     p.x = clamp(p.x + dx * speed * dt, -map.hx + PLAYER_RADIUS, map.hx - PLAYER_RADIUS);
     p.z = clamp(p.z + dz * speed * dt, -map.hz + PLAYER_RADIUS, map.hz - PLAYER_RADIUS);
     resolveCollision(p, obstacles);
@@ -552,12 +554,14 @@ io.on("connection", (socket) => {
     if (emoji) room.events.push({ type: "emote", id: p.id, emoji });
   });
 
-  socket.on("input", (input) => {
+  socket.on("input", (m) => {
     const room = rooms.get(roomCode);
-    if (!room) return;
+    if (!room || !m) return;
     const p = room.players.get(socket.id);
     if (!p) return;
-    p.input = { up: !!input.up, down: !!input.down, left: !!input.left, right: !!input.right };
+    p.f = clamp(+m.f || 0, -1, 1);
+    p.st = clamp(+m.st || 0, -1, 1);
+    if (typeof m.look === "number" && isFinite(m.look)) p.lookHeading = m.look;
   });
 
   socket.on("ping", () => {

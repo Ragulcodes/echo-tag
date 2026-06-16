@@ -18,6 +18,9 @@ const join = (c, code) => new Promise((res) =>
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const selfPos = (c) => { const p = c.last?.players.find((x) => x.self); return p && p.x !== null ? p : null; };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+// new input model: walk forward toward a point by facing it (look) with f=1
+const moveToward = (c, from, to) => c.s.emit("input", { f: 1, st: 0, look: Math.atan2(to.x - from.x, -(to.z - from.z)) });
+const stop = (c) => c.s.emit("input", { f: 0, st: 0 });
 
 const a = mkClient("Alice");
 const b = mkClient("Bob");
@@ -75,16 +78,16 @@ const hider = hunter === a ? b : a;
 log("hunter:", hunter.name, "hider:", hider.name);
 
 // hider stands still; hunter approaches but STOPS before tagging
-hider.s.emit("input", {});
+stop(hider);
 for (let i = 0; i < 50; i++) {
   const h = selfPos(hunter), v = selfPos(hider);
   if (h && v) {
-    if (dist(h, v) < 42) { hunter.s.emit("input", {}); break; }
-    hunter.s.emit("input", { right: v.x - h.x > 3, left: v.x - h.x < -3, up: v.z - h.z < -3, down: v.z - h.z > 3 });
+    if (dist(h, v) < 42) { stop(hunter); break; }
+    moveToward(hunter, h, v);
   }
   await sleep(110);
 }
-hunter.s.emit("input", {});
+stop(hunter);
 await sleep(200);
 
 // before pinging, the still hider should be INVISIBLE on the hunter's screen
@@ -139,14 +142,11 @@ const [hA, hB] = hidersC;
 let smooched = false;
 for (let i = 0; i < 70 && !smooched; i++) {
   const pa = selfPos(hA), pb = selfPos(hB);
-  if (pa && pb) {
-    hA.s.emit("input", { right: pb.x - pa.x > 2, left: pb.x - pa.x < -2, down: pb.z - pa.z > 2, up: pb.z - pa.z < -2 });
-    hB.s.emit("input", { right: pa.x - pb.x > 2, left: pa.x - pb.x < -2, down: pa.z - pb.z > 2, up: pa.z - pb.z < -2 });
-  }
+  if (pa && pb) { moveToward(hA, pa, pb); moveToward(hB, pb, pa); }
   await sleep(85);
   if ((hA.last.smooches || []).length > 0) smooched = true;
 }
-hA.s.emit("input", {}); hB.s.emit("input", {});
+stop(hA); stop(hB);
 assert(smooched, "two hiders bumping triggers a smooch (heart marker)");
 
 // ---- Scenario 3: bots, danger, emote ----
