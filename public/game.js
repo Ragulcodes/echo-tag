@@ -996,8 +996,15 @@ function animate() {
 }
 animate();
 
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+function applyResize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  // portrait phones get a wider FOV so the narrow screen still shows enough
+  camera.fov = h > w ? 76 : 56;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+}
+window.addEventListener("resize", applyResize);
+window.addEventListener("orientationchange", () => setTimeout(applyResize, 250));
+if (window.visualViewport) window.visualViewport.addEventListener("resize", applyResize);
+applyResize();

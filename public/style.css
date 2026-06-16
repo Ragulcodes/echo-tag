@@ -15,6 +15,7 @@ html, body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
   touch-action: none;
+  overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -254,3 +255,24 @@ button .sub { display: block; font-size: 11px; font-weight: 600; opacity: 0.85; 
 }
 /* mobile look pad — invisible drag region on the right half */
 #lookPad { position: fixed; right: 0; top: 0; width: 50%; height: 100%; z-index: 3; pointer-events: auto; touch-action: none; }
+
+/* ---------- mobile: notch-safe, orientation-aware control layout ---------- */
+@media (pointer: coarse) {
+  #joystick { left: calc(20px + env(safe-area-inset-left)); bottom: calc(24px + env(safe-area-inset-bottom)); }
+  #pingBtn  { right: calc(20px + env(safe-area-inset-right)); bottom: calc(28px + env(safe-area-inset-bottom)); }
+  #webBtn   { right: calc(120px + env(safe-area-inset-right)); bottom: calc(42px + env(safe-area-inset-bottom)); }
+  #viewBtn  { top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); }
+}
+/* portrait: keep the emote bar clear of the bottom thumb zone */
+@media (pointer: coarse) and (orientation: portrait) {
+  #emoteBar { bottom: calc(176px + env(safe-area-inset-bottom)); gap: 10px; }
+  #emoteBar button { width: 48px; height: 48px; font-size: 24px; }
+  #hud { top: calc(10px + env(safe-area-inset-top)); }
+}
+/* landscape: shorter screen — tuck the emote bar into the free center-bottom, shrink the stick */
+@media (pointer: coarse) and (orientation: landscape) {
+  #emoteBar { bottom: calc(14px + env(safe-area-inset-bottom)); }
+  #joystick { width: 112px; height: 112px; }
+  #pingBtn  { width: 84px; height: 84px; }
+  .panel { padding: 18px 22px; }
+}
